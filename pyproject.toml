@@ -9,7 +9,7 @@ repository = "https://github.com/rkkautsar/psmon"
 homepage = "https://github.com/rkkautsar/psmon"
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = ">=3.6"
 psutil = "^5.5"
 
 [tool.poetry.dev-dependencies]
