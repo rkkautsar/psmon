@@ -19,7 +19,7 @@ class CPUTimeTestCase(unittest.TestCase):
         program = Path(DIR) / "_programs" / "child_cpu_time_2.sh"
         limit = 3
         # Need faster polling
-        stats = run([program], cpu_time_limit=limit, period=0.05)
+        stats = run([program], cpu_time_limit=limit, freq=20)
         self.assertLess(stats["cpu_time"], limit + TOLERANCE)
 
 

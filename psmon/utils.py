@@ -21,7 +21,9 @@ def graceful_kill(pids, timeout=3):
     """
 
     stopped = []
-    procs = [psutil.Process(pid) for pid in pids]
+    initially_gone = [pid for pid in pids if not psutil.pid_exists(pid)]
+    alive = [pid for pid in pids if psutil.pid_exists(pid)]
+    procs = [psutil.Process(pid) for pid in alive]
 
     for proc in procs:
         proc.terminate()
@@ -36,7 +38,15 @@ def graceful_kill(pids, timeout=3):
         assert len(alive) > 0
         stopped += gone
 
-    return {proc.pid: proc.returncode for proc in stopped}
+    returncodes = {proc.pid: proc.returncode for proc in stopped}
+    for pid in initially_gone:
+        try:
+            ret = os.waitpid(pid, 0)
+            returncodes[pid] = ret
+        except:
+            continue
+
+    return returncodes
 
 
 ## {{{ http://code.activestate.com/recipes/578019/ (r15)
