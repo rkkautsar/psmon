@@ -28,17 +28,6 @@ def get_processes_info(processes):
     ]
 
 
-def stop_processes(processes):
-    processes_info = get_processes_info(processes)
-    running_pids = [
-        pinfo["pid"]
-        for pinfo in processes_info
-        if pinfo["status"] == psutil.STATUS_RUNNING
-    ]
-
-    graceful_kill(running_pids, [signal.SIGTERM, signal.SIGKILL])
-
-
 def set_limits(wall_time, cpu_time, memory, output):
     def fn():
         os.setpgrp()
@@ -129,19 +118,16 @@ def run(
             root_process_stats = processes[root_pid].get_accumulated_stats()
 
             if wall_time_limit and time.monotonic() - start_time > wall_time_limit:
-                stop_processes(processes)
                 error = TimeoutError
                 error_str = WALL_EXCEEDED_STR
                 break
 
             if cpu_time_limit and root_process_stats["cpu_time"] > cpu_time_limit:
-                stop_processes(processes)
                 error = TimeoutError
                 error_str = CPU_EXCEEDED_STR
                 break
 
             if memory_limit and root_process_stats["max_memory"] > memory_limit:
-                stop_processes(processes)
                 error = MemoryError
                 error_str = MEMORY_EXCEEDED_STR
                 break
@@ -154,16 +140,19 @@ def run(
             wall_time=end_time,
             cpu_time=root_process_stats["cpu_time"],
             max_memory=root_process_stats["max_memory"],
+            error_str=None,
+            error=None,
+            status_code=None,
         )
 
         if error:
             stats["error"] = error
             stats["error_str"] = error_str
 
-        ret = p.poll()
-        if ret:
-            stats["return_code"] = ret
+        return_codes = graceful_kill(processes)
+        stats["return_code"] = return_codes[root_pid]
 
-        stop_processes(processes)
+    if stats["error_str"]:
+        logger.warning(error_str)
 
     return stats

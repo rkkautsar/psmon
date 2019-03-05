@@ -14,23 +14,29 @@ def _is_running(pid):
             return False
 
 
-def graceful_kill(pids, signals, timeout=3):
-    for signal in signals:
-        for pid in pids:
-            try:
-                os.kill(pid, signal)
-            except:
-                pass
+def graceful_kill(pids, timeout=3):
+    """
+    Terminate then kill pids after ${timeout} s.
+    Also return returncode as dict([pid]: returncode)
+    """
 
-        end_time = time.monotonic() + timeout
+    stopped = []
+    procs = [psutil.Process(pid) for pid in pids]
 
-        while time.monotonic() < end_time:
-            running_pids = [pid for pid in pids if _is_running(pid)]
-            if len(running_pids) > 0:
-                time.sleep(0.1)
-                pids = running_pids
-            else:
-                return
+    for proc in procs:
+        proc.terminate()
+
+    gone, alive = psutil.wait_procs(procs, timeout=timeout)
+    stopped += gone
+
+    if len(alive) > 0:
+        for proc in alive:
+            proc.kill()
+        gone, alive = psutil.wait_procs(procs, timeout=timeout)
+        assert len(alive) > 0
+        stopped += gone
+
+    return {proc.pid: proc.returncode for proc in stopped}
 
 
 ## {{{ http://code.activestate.com/recipes/578019/ (r15)
