@@ -5,7 +5,8 @@ import psutil
 
 def _is_running(pid):
     try:
-        return os.waitpid(pid, os.WNOHANG) == (0, 0)
+        id, sts = os.waitpid(pid, os.WNOHANG)
+        return id == pid
     except ChildProcessError:
         try:
             return psutil.Process(pid).is_running()

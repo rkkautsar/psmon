@@ -2,9 +2,10 @@ import os
 import multiprocessing
 import time
 import signal
-from subprocess import Popen, PIPE
-from collections import namedtuple
 import resource
+from subprocess import Popen, PIPE
+from loguru import logger
+from collections import namedtuple
 import subprocess
 
 import psutil
@@ -17,108 +18,38 @@ CPU_EXCEEDED_STR = "CPU time limit exceeded!"
 MEMORY_EXCEEDED_STR = "Memory usage limit exceeded!"
 
 
-class Watcher(multiprocessing.Process):
-    def __init__(
-        self,
-        root_pid,
-        period=0.1,
-        wall_time_limit=None,
-        cpu_time_limit=None,
-        memory_limit=None,
-        pipe=None,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.pipe = pipe
-        self.root_pid = root_pid
-        self.period = period
-        self.wall_time_limit = wall_time_limit
-        self.cpu_time_limit = cpu_time_limit
-        self.memory_limit = memory_limit
-        self.processes = {}
-
-    def get_processes_info(self):
-        return [
-            p.info
-            for p in psutil.process_iter(
-                attrs=["pid", "ppid", "cpu_times", "memory_info", "status"]
-            )
-            if p.info["pid"] in self.processes or p.info["ppid"] in self.processes
-        ]
-
-    def stop_processes(self, error=None, error_str=None, timeout=3):
-        if error_str:
-            print("[!] {}".format(error_str))
-
-        processes_info = self.get_processes_info()
-        running_pids = [
-            pinfo["pid"]
-            for pinfo in processes_info
-            if pinfo["status"] == psutil.STATUS_RUNNING
-        ]
-
-        graceful_kill(running_pids, [signal.SIGTERM, signal.SIGKILL], timeout)
-
-    def run(self):
-        self.processes[self.root_pid] = ProcessNode(self.root_pid)
-        root_process = psutil.Process(self.root_pid)
-
-        start_time = time.monotonic()
-
-        if self.wall_time_limit:
-
-            def alarm_handler(*args):
-                self.stop_processes(error=TimeoutError, error_str=WALL_EXCEEDED_STR)
-
-            signal.signal(signal.SIGALRM, alarm_handler)
-            signal.alarm(self.wall_time_limit)
-
-        while (
-            root_process.is_running()
-            and not root_process.status() == psutil.STATUS_ZOMBIE
-        ):
-            processes_info = self.get_processes_info()
-
-            for pinfo in processes_info:
-                if pinfo["pid"] not in self.processes:
-                    self.processes[pinfo["pid"]] = ProcessNode(pinfo["pid"])
-                    self.processes[pinfo["ppid"]].add_child(
-                        self.processes[pinfo["pid"]]
-                    )
-
-                if pinfo["cpu_times"] is None or pinfo["memory_info"] is None:
-                    continue
-
-                cpu_time = pinfo["cpu_times"].user + pinfo["cpu_times"].system
-                memory = pinfo["memory_info"].rss
-
-                self.processes[pinfo["pid"]].update(cpu_time, memory)
-
-            if (
-                self.cpu_time_limit
-                and self.processes[self.root_pid].cpu_time > self.cpu_time_limit
-            ):
-                self.stop_processes(error=TimeoutError, error_str=CPU_EXCEEDED_STR)
-                break
-
-            if (
-                self.memory_limit
-                and self.processes[self.root_pid].max_memory > self.memory_limit
-            ):
-                self.stop_processes(error=MemoryError, error_str=MEMORY_EXCEEDED_STR)
-                break
-
-            time.sleep(self.period)
-
-        signal.alarm(0)
-        self.stop_processes()
-        self.pipe.send(
-            dict(
-                wall_time=time.monotonic() - start_time,
-                cpu_time=self.processes[self.root_pid].cpu_time,
-                max_memory=self.processes[self.root_pid].max_memory,
-            )
+def get_processes_info(processes):
+    return [
+        p.info
+        for p in psutil.process_iter(
+            attrs=["pid", "ppid", "cpu_times", "memory_info", "status"]
         )
+        if p.info["pid"] in processes or p.info["ppid"] in processes
+    ]
+
+
+def stop_processes(processes):
+    processes_info = get_processes_info(processes)
+    running_pids = [
+        pinfo["pid"]
+        for pinfo in processes_info
+        if pinfo["status"] == psutil.STATUS_RUNNING
+    ]
+
+    graceful_kill(running_pids, [signal.SIGTERM, signal.SIGKILL])
+
+
+def set_limits(wall_time, cpu_time, memory, output):
+    def fn():
+        os.setpgrp()
+        MB = 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_NPROC, (1024, 1024))
+        if memory:
+            resource.setrlimit(resource.RLIMIT_AS, (memory, memory + 100 * MB))
+        if output:
+            resource.setrlimit(resource.RLIMIT_FSIZE, (output, output + 100 * MB))
+
+    return fn
 
 
 def run(
@@ -127,27 +58,112 @@ def run(
     wall_time_limit=None,
     cpu_time_limit=None,
     memory_limit=None,
+    output_limit=None,
+    stdout=PIPE,
+    stderr=PIPE,
+    freq=10,
     **kwargs,
 ):
-    process = Popen(args, *popenargs, stdout=PIPE, stderr=PIPE, preexec_fn=os.setpgrp)
-    process.poll()
     if type(memory_limit) == str:
         memory_limit = human2bytes(memory_limit)
 
-    recv_pipe, send_pipe = multiprocessing.Pipe(duplex=False)
-    watcher_process = Watcher(
-        process.pid,
-        wall_time_limit=wall_time_limit,
-        cpu_time_limit=cpu_time_limit,
-        memory_limit=memory_limit,
-        pipe=send_pipe,
-        daemon=True,
+    processes = {}
+    error = None
+    error_str = None
+
+    start_time = time.monotonic()
+
+    with Popen(
+        args,
+        *popenargs,
+        stdout=stdout,
+        stderr=stdout,
+        preexec_fn=set_limits(
+            wall_time_limit, cpu_time_limit, memory_limit, output_limit
+        ),
         **kwargs,
-    )
-    watcher_process.start()
-    outs, errs = process.communicate()
-    # process.wait()
-    stats = recv_pipe.recv()
-    print(stats)
-    watcher_process.join()
+    ) as p:
+        root_pid = p.pid
+
+        pid, ret, res = os.wait4(root_pid, os.WNOHANG | os.WUNTRACED)
+        if pid == root_pid:
+            # Already terminated
+            return dict(
+                wall_time=time.monotonic() - start_time,
+                cpu_time=res.ru_utime + res.ru_stime,
+                max_memory=res.ru_maxrss,
+                return_code=ret,
+            )
+
+        root_process = psutil.Process(root_pid)
+        pinfo = root_process.as_dict(attrs=["cpu_times", "memory_info"])
+        processes[root_pid] = ProcessNode(root_pid)
+
+        cpu_time = 0
+        memory = 0
+        if pinfo["cpu_times"] is not None:
+            cpu_time = pinfo["cpu_times"].user + pinfo["cpu_times"].system
+        if pinfo["memory_info"] is not None:
+            memory = pinfo["memory_info"].rss
+        processes[root_pid].update(cpu_time, memory)
+
+        while (
+            root_process.is_running()
+            and not root_process.status() == psutil.STATUS_ZOMBIE
+        ):
+            processes_info = get_processes_info(processes)
+
+            for pinfo in processes_info:
+                if pinfo["pid"] not in processes:
+                    processes[pinfo["pid"]] = ProcessNode(pinfo["pid"])
+                    processes[pinfo["ppid"]].add_child(processes[pinfo["pid"]])
+
+                if pinfo["cpu_times"] is None or pinfo["memory_info"] is None:
+                    continue
+
+                cpu_time = pinfo["cpu_times"].user + pinfo["cpu_times"].system
+                memory = pinfo["memory_info"].rss
+
+                processes[pinfo["pid"]].update(cpu_time, memory)
+
+            root_process_stats = processes[root_pid].get_accumulated_stats()
+
+            if wall_time_limit and time.monotonic() - start_time > wall_time_limit:
+                stop_processes(processes)
+                error = TimeoutError
+                error_str = WALL_EXCEEDED_STR
+                break
+
+            if cpu_time_limit and root_process_stats["cpu_time"] > cpu_time_limit:
+                stop_processes(processes)
+                error = TimeoutError
+                error_str = CPU_EXCEEDED_STR
+                break
+
+            if memory_limit and root_process_stats["max_memory"] > memory_limit:
+                stop_processes(processes)
+                error = MemoryError
+                error_str = MEMORY_EXCEEDED_STR
+                break
+
+            time.sleep(1.0 / freq)
+
+        end_time = time.monotonic() - start_time
+        root_process_stats = processes[root_pid].get_accumulated_stats()
+        stats = dict(
+            wall_time=end_time,
+            cpu_time=root_process_stats["cpu_time"],
+            max_memory=root_process_stats["max_memory"],
+        )
+
+        if error:
+            stats["error"] = error
+            stats["error_str"] = error_str
+
+        ret = p.poll()
+        if ret:
+            stats["return_code"] = ret
+
+        stop_processes(processes)
+
     return stats

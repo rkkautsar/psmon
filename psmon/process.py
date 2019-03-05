@@ -15,8 +15,13 @@ class ProcessNode:
         self.max_memory = max(self.max_memory, memory)
         self.cpu_time = cpu_time
 
-        if self.parent:
-            self.parent.update(
-                self.parent.cpu_time + cpu_time,
-                self.parent.max_memory + self.max_memory,
-            )
+    def get_accumulated_stats(self):
+        max_memory = self.max_memory
+        cpu_time = self.cpu_time
+
+        for child in self.children:
+            child_stats = child.get_accumulated_stats()
+            max_memory += child_stats["max_memory"]
+            cpu_time += child_stats["cpu_time"]
+
+        return dict(max_memory=max_memory, cpu_time=cpu_time)
