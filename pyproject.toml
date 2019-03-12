@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "psmon"
-version = "0.2.2"
+version = "1.0.0"
 description = "Process monitoring"
 authors = ["Rakha Kanz Kautsar <rkkautsar@gmail.com>"]
 license = "MIT"

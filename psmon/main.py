@@ -1,188 +1,200 @@
 import os
-import multiprocessing
 import time
-import signal
+import atexit
 import resource
+import threading
+import psutil
+from queue import Queue
 from subprocess import Popen, PIPE
 from loguru import logger
-from collections import namedtuple
-import subprocess
 
-import psutil
-
-from psmon.process import ProcessNode
-from psmon.utils import graceful_kill, human2bytes
-
-WALL_EXCEEDED_STR = "Wall time limit exceeded!"
-CPU_EXCEEDED_STR = "CPU time limit exceeded!"
-MEMORY_EXCEEDED_STR = "Memory usage limit exceeded!"
+from psmon.utils import graceful_kill
 
 
-class Watcher:
-    def __init__(self, args, *popenargs, stdout=PIPE, stderr=PIPE, **popenkwargs):
-        self.args = args
+class Reader(threading.Thread):
+    def __init__(self, fd, queue, text=False):
+        super().__init__()
+        self._fd = fd
+        self._queue = queue
+        self._text = text
+
+    def run(self):
+        for line in iter(self._fd.readline, b""):
+            if self._text:
+                line = line.decode().strip()
+            self._queue.put(line)
+
+
+class ProcessMonitor:
+    def __init__(
+        self,
+        *popenargs,
+        input=None,
+        capture_output=False,
+        freq=10,
+        text=False,
+        **kwargs,
+    ):
+        if input is not None:
+            if "stdin" in kwargs:
+                raise ValueError("stdin and input arguments may not both be used.")
+            kwargs["stdin"] = PIPE
+
+        if capture_output:
+            if ("stdout" in kwargs) or ("stderr" in kwargs):
+                raise ValueError(
+                    "stdout and stderr arguments may not be used "
+                    "with capture_output."
+                )
+            kwargs["stdout"] = PIPE
+            kwargs["stderr"] = PIPE
+            self.stdout_queue = Queue()
+            self.stderr_queue = Queue()
+
         self.popenargs = popenargs
-        self.stdout = stdout
-        self.stderr = stderr
-        self.popenkwargs = popenkwargs
+        self.input = input
+        self.capture_output = capture_output
+        self.text = text
+        self.freq = freq
+        self.kwargs = kwargs
+        self.watchers = {}
+        self.watched_attrs = dict(pid=1, ppid=1)
+        self.root_process = None
+        self.processes = set()
+
+    def subscribe(self, watcher_id, watcher):
+        self.watchers[watcher_id] = watcher
+        for attr in watcher.watched_attrs:
+            self.watch_attr(attr)
+
+    def unsubscribe(self, watcher_id):
+        watcher = self.watchers[watcher_id]
+        for attr in watcher.watched_attrs:
+            self.unwatch_attr(attr)
+        del self.watchers[watcher_id]
+
+    def watch_attr(self, attr):
+        if attr in self.watched_attrs:
+            self.watched_attrs[attr] += 1
+        else:
+            self.watched_attrs[attr] = 1
+
+    def unwatch_attr(self, attr):
+        self.watched_attrs[attr] -= 1
+        if self.watched_attrs[attr] == 0:
+            del self.watched_attrs[attr]
+
+    def update_tree(self):
+        children = self.root_process.children(recursive=True)
+        self.processes.update(set(children))
+
+    def try_get_process_info(self, process):
+        try:
+            return process.as_dict(list(self.watched_attrs.keys()))
+        except psutil.NoSuchProcess:
+            return None
 
     def get_processes_info(self):
-        return [
-            p.info
-            for p in psutil.process_iter(
-                attrs=["pid", "ppid", "cpu_times", "memory_info", "status"]
-            )
-            if p.info["pid"] in self.processes or p.info["ppid"] in self.processes
-        ]
+        return list(
+            filter(None.__ne__, [self.try_get_process_info(p) for p in self.processes])
+        )
+
+    def send_processes_stats(self, stats):
+        for watcher in self.watchers.values():
+            watcher.update(stats)
+
+    def is_root_process_running(self):
+        return (
+            self.root_process.is_running
+            and not self.root_process.status() == psutil.STATUS_ZOMBIE
+        )
 
     def stop(self):
         return graceful_kill(self.processes)
 
-    def run(
-        self,
-        wall_time_limit=None,
-        cpu_time_limit=None,
-        memory_limit=None,
-        output_limit=None,
-        freq=10,
-    ):
-        if type(memory_limit) == str:
-            memory_limit = human2bytes(memory_limit)
+    def run(self):
+        atexit.register(self.stop)
 
-        self.processes = {}
-        error = None
-        error_str = None
+        stdout_reader = None
+        stderr_reader = None
 
-        start_time = time.monotonic()
+        with Popen(*self.popenargs, preexec_fn=os.setpgrp, **self.kwargs) as process:
+            if self.capture_output:
+                stdout_reader = Reader(process.stdout, self.stdout_queue, self.text)
+                stderr_reader = Reader(process.stderr, self.stderr_queue, self.text)
+                stdout_reader.start()
+                stderr_reader.start()
+            if self.input:
+                process.stdin.write(self.input)
 
-        def set_limits():
-            os.setpgrp()
-            MB = 1024 * 1024
-            resource.setrlimit(resource.RLIMIT_NPROC, (1024, 1024))
-            if memory_limit:
-                resource.setrlimit(
-                    resource.RLIMIT_AS, (memory_limit, memory_limit + 100 * MB)
-                )
-            if output_limit:
-                resource.setrlimit(
-                    resource.RLIMIT_FSIZE, (output_limit, output_limit + 100 * MB)
-                )
+            error = None
+            error_str = None
+            is_premature_stop = False
+            root_pid = process.pid
+            for watcher in self.watchers.values():
+                watcher.register_root(root_pid)
+            self.root_process = psutil.Process(root_pid)
+            self.processes.add(self.root_process)
+            processes_info = self.get_processes_info()
+            if len(processes_info) == 0:
+                is_premature_stop = True
+            else:
+                self.send_processes_stats(processes_info)
 
-        with Popen(
-            self.args,
-            *self.popenargs,
-            stdout=self.stdout,
-            stderr=self.stderr,
-            preexec_fn=set_limits,
-            **self.popenkwargs,
-        ) as p:
-            root_pid = p.pid
-
-            pid, ret, res = os.wait4(root_pid, os.WNOHANG | os.WUNTRACED)
-            if pid == root_pid:
-                # Already terminated
-                return dict(
-                    wall_time=time.monotonic() - start_time,
-                    cpu_time=res.ru_utime + res.ru_stime,
-                    max_memory=res.ru_maxrss,
-                    return_code=ret,
-                    error=None,
-                    error_str=None,
-                )
-
-            root_process = psutil.Process(root_pid)
-            pinfo = root_process.as_dict(attrs=["cpu_times", "memory_info"])
-            self.processes[root_pid] = ProcessNode(root_pid)
-
-            cpu_time = 0
-            memory = 0
-            if pinfo["cpu_times"] is not None:
-                cpu_time = pinfo["cpu_times"].user + pinfo["cpu_times"].system
-            if pinfo["memory_info"] is not None:
-                memory = pinfo["memory_info"].rss
-            self.processes[root_pid].update(cpu_time, memory)
-
-            while (
-                root_process.is_running()
-                and not root_process.status() == psutil.STATUS_ZOMBIE
-            ):
-                processes_info = self.get_processes_info()
-
-                for pinfo in processes_info:
-                    if pinfo["pid"] not in self.processes:
-                        self.processes[pinfo["pid"]] = ProcessNode(pinfo["pid"])
-                        self.processes[pinfo["ppid"]].add_child(
-                            self.processes[pinfo["pid"]]
-                        )
-
-                    if pinfo["cpu_times"] is None or pinfo["memory_info"] is None:
-                        continue
-
-                    cpu_time = pinfo["cpu_times"].user + pinfo["cpu_times"].system
-                    memory = pinfo["memory_info"].rss
-
-                    self.processes[pinfo["pid"]].update(cpu_time, memory)
-
-                root_process_stats = self.processes[root_pid].get_accumulated_stats()
-
-                if wall_time_limit and time.monotonic() - start_time > wall_time_limit:
-                    error = TimeoutError
-                    error_str = WALL_EXCEEDED_STR
+            should_terminate = False
+            while self.is_root_process_running() and not should_terminate:
+                try:
+                    self.update_tree()
+                except psutil.NoSuchProcess:
                     break
 
-                if cpu_time_limit and root_process_stats["cpu_time"] > cpu_time_limit:
-                    error = TimeoutError
-                    error_str = CPU_EXCEEDED_STR
-                    break
+                self.send_processes_stats(self.get_processes_info())
 
-                if memory_limit and root_process_stats["max_memory"] > memory_limit:
-                    error = MemoryError
-                    error_str = MEMORY_EXCEEDED_STR
-                    break
+                for watcher in self.watchers.values():
+                    if watcher.should_terminate(root_pid):
+                        error, error_str = watcher.get_error(root_pid)
+                        should_terminate = True
+                        break
 
-                time.sleep(1.0 / freq)
+                time.sleep(1.0 / self.freq)
 
-            end_time = time.monotonic() - start_time
-            root_process_stats = self.processes[root_pid].get_accumulated_stats()
-            stats = dict(
-                wall_time=end_time,
-                cpu_time=root_process_stats["cpu_time"],
-                max_memory=root_process_stats["max_memory"],
-                error_str=None,
-                error=None,
-                status_code=None,
-            )
+            if is_premature_stop:
+                pid, ret, res = os.wait4(root_pid, os.WNOHANG | os.WUNTRACED)
+                assert pid == root_pid
+                stats = {
+                    watcher_id: watcher.fallback(res)
+                    for watcher_id, watcher in self.watchers.items()
+                }
+                stats["return_code"] = ret
+            else:
+                stats = {
+                    watcher_id: watcher.get_stats(root_pid)
+                    for watcher_id, watcher in self.watchers.items()
+                }
+                return_codes = self.stop()
+                stats["return_code"] = return_codes[root_pid]
 
-            if error:
-                stats["error"] = error
-                stats["error_str"] = error_str
+            stats["error"] = error
+            stats["error_str"] = error_str
 
-            return_codes = self.stop()
-            stats["return_code"] = return_codes[root_pid]
+        if self.capture_output:
+            stdout_reader.join()
+            stderr_reader.join()
+            stdout = []
+            while not self.stdout_queue.empty():
+                stdout.append(self.stdout_queue.get())
+            stderr = []
+            while not self.stderr_queue.empty():
+                stderr.append(self.stderr_queue.get())
+            stats["stdout"] = stdout
+            stats["stderr"] = stderr
 
-        if stats["error_str"]:
-            logger.warning(error_str)
+        if stats["error"]:
+            logger.warning(stats["error_str"])
 
+        atexit.unregister(self.stop)
+        res = resource.getrusage(resource.RUSAGE_SELF)
+        logger.info(
+            f"Used approximately {res.ru_utime + res.ru_stime: .2f}s cpu time for monitoring"
+        )
         return stats
-
-
-def run(
-    args,
-    *popenargs,
-    stdout=PIPE,
-    stderr=PIPE,
-    wall_time_limit=None,
-    cpu_time_limit=None,
-    memory_limit=None,
-    output_limit=None,
-    freq=10,
-    **popenkwargs,
-):
-    watcher = Watcher(args, *popenargs, stdout=stdout, stderr=stderr, **popenkwargs)
-    return watcher.run(
-        wall_time_limit=wall_time_limit,
-        cpu_time_limit=cpu_time_limit,
-        memory_limit=memory_limit,
-        output_limit=output_limit,
-        freq=freq,
-    )
