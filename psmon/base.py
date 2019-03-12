@@ -1,4 +1,4 @@
-class Limiter(object):
+class Watcher(object):
     watched_attrs = []
 
     def fallback(self, res):

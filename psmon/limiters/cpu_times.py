@@ -1,8 +1,8 @@
 from collections import defaultdict, namedtuple
-from psmon.limiters.base import Limiter
+from psmon.base import Watcher
 
 
-class CpuTimeLimiter(Limiter):
+class CpuTimeLimiter(Watcher):
     watched_attrs = ["cpu_times"]
 
     def __init__(self, limit):

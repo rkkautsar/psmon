@@ -1,8 +1,8 @@
 import time
-from psmon.limiters.base import Limiter
+from psmon.base import Watcher
 
 
-class WallTimeLimiter(Limiter):
+class WallTimeLimiter(Watcher):
     watched_attrs = []
 
     def __init__(self, limit):

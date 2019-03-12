@@ -1,8 +1,8 @@
 from collections import defaultdict, namedtuple
-from psmon.limiters.base import Limiter
+from psmon.base import Watcher
 
 
-class MaxMemoryLimiter(Limiter):
+class MaxMemoryLimiter(Watcher):
     watched_attrs = ["memory_info"]
 
     def __init__(self, limit):
