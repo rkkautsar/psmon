@@ -194,7 +194,7 @@ class ProcessMonitor:
 
         atexit.unregister(self.stop)
         res = resource.getrusage(resource.RUSAGE_SELF)
-        logger.info(
-            f"Used approximately {res.ru_utime + res.ru_stime: .2f}s cpu time for monitoring"
-        )
+        own_cpu_time = res.ru_utime + res.ru_stime
+        logger.debug(f"Used approximately {own_cpu_time: .2f}s cpu time for monitoring")
+        logger.info(stats)
         return stats
