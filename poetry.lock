@@ -65,11 +65,11 @@ description = "The uncompromising code formatter."
 name = "black"
 optional = false
 python-versions = ">=3.6"
-version = "18.9b0"
+version = "19.3b0"
 
 [package.dependencies]
 appdirs = "*"
-attrs = ">=17.4.0"
+attrs = ">=18.1.0"
 click = ">=6.5"
 toml = ">=0.9.4"
 
@@ -199,7 +199,7 @@ python-versions = "*"
 version = "1.11.1"
 
 [metadata]
-content-hash = "4a33ab5a35b80582ac1de5af5e45628932785ff5d8e4be9f395f374062178916"
+content-hash = "619e3fc52df1ed5752150494c9fdc09014e984935d2e8223553b93228a7df27a"
 python-versions = ">=3.6"
 
 [metadata.hashes]
@@ -208,7 +208,7 @@ appdirs = ["9e5896d1372858f8dd3344faf4e5014d21849c756c8d5701f78f8a103b372d92", "
 astroid = ["1d5d0e6e408701ae657342645465d08be6fb66cf0ede16a31cc6435bd2e61718", "8fc40235cd184bff5d7b8e1284a647005cbd36bbc87d0c39f6f6389ae26e17ad"]
 attrs = ["10cbf6e27dbce8c30807caf056c8eb50917e0eaafe86347671b57254006c3e69", "ca4be454458f9dec299268d472aaa5a11f67a4ff70093396e1ceae9c76cf4bbb"]
 better-exceptions-fork = ["5f0983da51e956dbdaf8b9a3d10e2774b382ce6c6ff2e54685c33e2dbe8f1472"]
-black = ["817243426042db1d36617910df579a54f1afd659adb96fc5032fcf4b36209739", "e030a9a28f542debc08acceb273f228ac422798e5215ba2a791a6ddeaaca22a5"]
+black = ["09a9dcb7c46ed496a9850b76e4e825d6049ecd38b611f1224857a79bd985a8cf", "68950ffd4d9169716bcb8719a56c07a2f4485354fec061cdd5910aa07369731c"]
 click = ["2335065e6395b9e67ca716de5f7526736bfa6ceead690adf616d925bdc622b13", "5b94b49521f6456670fdb30cd82a4eca9412788a93fa6dd6df72c94d5a8ff2d7"]
 colorama = ["05eed71e2e327246ad6b38c540c4a3117230b19679b875190486ddd2d721422d", "f8ac84de7840f5b9c4e3347b3c1eaa50f7e49c2b07596221daec5edaabbd7c48"]
 isort = ["ee5fddfd792e6e1d664ee28f3fbe00dfc26d8d3c6f059ee78f4da4c19718007c", "f19b23b22fb5a919a081bc31aabcc0991614c244d9215267e11abf2ca7b684ce"]
