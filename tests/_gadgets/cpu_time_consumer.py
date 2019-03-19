@@ -8,10 +8,10 @@ import sys
 import time
 
 time_to_consume = int(sys.argv[1])
-start_time = time.monotonic()
+start_time = time.perf_counter()
 
 dummy = 0
-while time.monotonic() - start_time < time_to_consume:
+while time.perf_counter() - start_time < time_to_consume:
     dummy = dummy + 1
 
 if len(sys.argv) > 2:
