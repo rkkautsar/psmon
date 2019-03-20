@@ -1,4 +1,4 @@
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from psmon.base import Watcher
 
 
@@ -16,13 +16,8 @@ class CommonResourceLimiter(Watcher):
         self._root = pid
         self._resource_usage[pid] = None
 
-    def _get_resource_usage(self, stats):
-        return 0
-
-    def _get_max_usage(self, previous, current):
-        if previous is None:
-            return current
-        return max(previous, current)
+    def _get_resource_usage(self, stats, pid):
+        raise NotImplementedError()
 
     def _update(self, root, by_pid):
         if root not in by_pid:
@@ -49,9 +44,6 @@ class CommonResourceLimiter(Watcher):
                 self._resource_usage[pid] = None
         self._update(self._root, by_pid)
 
-    def fallback(self, res):
-        return 0
-
     def get_stats(self, pid):
         return self._resource_usage[pid]
 
@@ -60,5 +52,16 @@ class CommonResourceLimiter(Watcher):
             return False
         return self.get_stats(pid) > self._limit
 
-    def get_error(self, pid):
+    @classmethod
+    def fallback(cls, res):
+        raise NotImplementedError()
+
+    @classmethod
+    def _get_max_usage(cls, previous, current):
+        if previous is None:
+            return current
+        return max(previous, current)
+
+    @classmethod
+    def get_error(cls, pid):
         return (ResourceWarning, "Resource usage limit exceeded!")

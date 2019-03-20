@@ -9,11 +9,14 @@ class CpuTimeLimiter(CommonResourceLimiter):
             return self._resource_usage[pid]
         return stats["cpu_times"].user + stats["cpu_times"].system
 
-    def _get_max_usage(self, previous, current):
-        return current
-
-    def fallback(self, res):
+    @classmethod
+    def fallback(cls, res):
         return res.ru_utime + res.ru_stime
 
-    def get_error(self, pid):
+    @classmethod
+    def _get_max_usage(cls, previous, current):
+        return current
+
+    @classmethod
+    def get_error(cls, pid):
         return (TimeoutError, "CPU time limit exceeded!")

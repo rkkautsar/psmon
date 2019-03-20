@@ -47,7 +47,7 @@ def graceful_kill(processes, timeout=3):
     for proc in processes:
         try:
             proc.terminate()
-        except:
+        except psutil.NoSuchProcess:
             continue
 
     gone, alive = psutil.wait_procs(processes, timeout=timeout)
@@ -65,7 +65,7 @@ def graceful_kill(processes, timeout=3):
         try:
             ret = os.waitpid(proc.pid, 0)
             returncodes[proc.pid] = ret
-        except:
+        except ChildProcessError:
             continue
 
     return returncodes

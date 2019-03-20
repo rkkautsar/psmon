@@ -1,7 +1,6 @@
 import os.path
 import unittest
 from pathlib import Path
-from tempfile import TemporaryFile
 
 from psmon import ProcessMonitor
 from psmon.limiters import WallTimeLimiter

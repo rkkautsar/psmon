@@ -9,8 +9,10 @@ class MaxMemoryLimiter(CommonResourceLimiter):
             return self._resource_usage[pid]
         return stats["memory_info"].rss
 
-    def fallback(self, res):
+    @classmethod
+    def fallback(cls, res):
         return res.ru_maxrss
 
-    def get_error(self, pid):
+    @classmethod
+    def get_error(cls, pid):
         return (MemoryError, "Max memory limit exceeded!")
