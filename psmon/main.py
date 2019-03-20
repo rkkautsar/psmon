@@ -11,14 +11,7 @@ from psmon.utils import FileReader, graceful_kill, first_true, extract_file_queu
 
 
 class ProcessMonitor:
-    def __init__(
-        self,
-        *popenargs,
-        input=None,
-        capture_output=False,
-        freq=10,
-        **kwargs,
-    ):
+    def __init__(self, *popenargs, input=None, capture_output=False, freq=10, **kwargs):
         if input is not None:
             if "stdin" in kwargs:
                 raise ValueError("stdin and input arguments may not both be used.")
@@ -41,7 +34,7 @@ class ProcessMonitor:
         self.freq = freq
         self.kwargs = kwargs
         self.watchers = {}
-        self.watched_attrs = dict(pid=1, ppid=1)
+        self.watched_attrs = dict(pid=1, ppid=1, status=1)
         self.root_process = None
         self.processes = set()
 
@@ -74,7 +67,7 @@ class ProcessMonitor:
     def try_get_process_info(self, process):
         try:
             stats = process.as_dict(list(self.watched_attrs.keys()))
-            if any(map(lambda x: x is None, stats.values())):
+            if stats["status"] == psutil.STATUS_ZOMBIE:
                 return None
             return stats
         except psutil.NoSuchProcess:
@@ -105,15 +98,6 @@ class ProcessMonitor:
         stderr_reader = None
 
         with Popen(*self.popenargs, preexec_fn=os.setpgrp, **self.kwargs) as process:
-            if self.capture_output:
-                stdout_reader = FileReader(process.stdout, self.stdout_queue)
-                stderr_reader = FileReader(process.stderr, self.stderr_queue)
-                stdout_reader.start()
-                stderr_reader.start()
-            if self.input:
-                process.stdin.write(self.input)
-                process.stdin.close()
-
             error = None
             error_str = None
             is_premature_stop = False
@@ -126,10 +110,19 @@ class ProcessMonitor:
             self.processes.add(self.root_process)
 
             processes_info = self.get_processes_info()
+            self.send_processes_stats(processes_info)
+
             if len(processes_info) == 0:
                 is_premature_stop = True
-            else:
-                self.send_processes_stats(processes_info)
+
+            if self.capture_output:
+                stdout_reader = FileReader(process.stdout, self.stdout_queue)
+                stderr_reader = FileReader(process.stderr, self.stderr_queue)
+                stdout_reader.start()
+                stderr_reader.start()
+            if self.input:
+                process.stdin.write(self.input)
+                process.stdin.close()
 
             should_terminate = False
             while self.is_root_process_running() and not should_terminate:
