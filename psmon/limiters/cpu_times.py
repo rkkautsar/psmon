@@ -14,6 +14,7 @@ class CpuTimeLimiter(Watcher):
 
     def register_root(self, pid):
         self._root = pid
+        self._cpu_times[pid] = 0
 
     def _update(self, root, by_pid):
         if root not in by_pid or by_pid[root]["cpu_times"] is None:

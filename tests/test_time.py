@@ -12,7 +12,7 @@ TOLERANCE = 0.5
 class CPUTimeTestCase(unittest.TestCase):
     def test_children(self):
         program = Path(DIR) / "_programs" / "child_cpu_time_1.sh"
-        limit = 2
+        limit = 1
         monitor = ProcessMonitor([program])
         monitor.subscribe("cpu_time", CpuTimeLimiter(limit))
         stats = monitor.run()
@@ -20,7 +20,7 @@ class CPUTimeTestCase(unittest.TestCase):
 
     def test_grandchildren(self):
         program = Path(DIR) / "_programs" / "child_cpu_time_2.sh"
-        limit = 2
+        limit = 1
         monitor = ProcessMonitor([program])
         monitor.subscribe("cpu_time", CpuTimeLimiter(limit))
         stats = monitor.run()
@@ -30,7 +30,7 @@ class CPUTimeTestCase(unittest.TestCase):
 class WallTimeTestCase(unittest.TestCase):
     def test_children(self):
         program = Path(DIR) / "_programs" / "child_cpu_time_1.sh"
-        limit = 2
+        limit = 1
         monitor = ProcessMonitor([program])
         monitor.subscribe("wall_time", WallTimeLimiter(limit))
         stats = monitor.run()
@@ -38,7 +38,7 @@ class WallTimeTestCase(unittest.TestCase):
 
     def test_grandchildren(self):
         program = Path(DIR) / "_programs" / "child_cpu_time_2.sh"
-        limit = 2
+        limit = 1
         monitor = ProcessMonitor([program])
         monitor.subscribe("wall_time", WallTimeLimiter(limit))
         stats = monitor.run()

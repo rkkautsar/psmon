@@ -11,4 +11,4 @@ install:
   - poetry install
 
 script:
-  - poetry run python -m unittest discover -s tests
+  - poetry run pytest --workers auto

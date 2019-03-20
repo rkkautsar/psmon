@@ -45,7 +45,10 @@ def graceful_kill(processes, timeout=3):
     processes = [p for p in processes if p not in initially_gone]
 
     for proc in processes:
-        proc.terminate()
+        try:
+            proc.terminate()
+        except:
+            continue
 
     gone, alive = psutil.wait_procs(processes, timeout=timeout)
     stopped += gone

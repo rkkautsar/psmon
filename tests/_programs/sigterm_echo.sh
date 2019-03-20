@@ -1,6 +1,7 @@
 #!/bin/bash
 
-trap "echo [$1] got SIGTERM; exit" SIGTERM
+trap "echo [$1] got signal SIGTERM; exit" TERM
+trap "echo [$1] got signal SIGEXIT; exit" EXIT
 
 depth=$1
 
