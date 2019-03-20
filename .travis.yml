@@ -4,10 +4,6 @@ python:
   - 3.6
   - 3.7
 
-env:
-  global:
-    - CC_TEST_REPORTER_ID=21357f35f0a0f044a036d38f1a2896a8e03c37e484ee3c43a3020277d363f172
-
 before_install:
   - pip install poetry
 
