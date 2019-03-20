@@ -14,12 +14,14 @@ class CommonResourceLimiter(Watcher):
 
     def register_root(self, pid):
         self._root = pid
-        self._resource_usage[pid] = 0
+        self._resource_usage[pid] = None
 
     def _get_resource_usage(self, stats):
         return 0
 
     def _get_max_usage(self, previous, current):
+        if previous is None:
+            return current
         return max(previous, current)
 
     def _update(self, root, by_pid):
@@ -44,7 +46,7 @@ class CommonResourceLimiter(Watcher):
             if pid not in self._known_pids:
                 self._known_pids.add(pid)
                 self._tree[pinfo["ppid"]].append(pid)
-                self._resource_usage[pid] = 0
+                self._resource_usage[pid] = None
         self._update(self._root, by_pid)
 
     def fallback(self, res):
