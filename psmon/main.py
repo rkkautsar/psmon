@@ -1,28 +1,13 @@
-import os
-import time
 import atexit
+import os
 import resource
-import threading
-import psutil
+import time
 from queue import Queue
-from subprocess import Popen, PIPE
+from subprocess import PIPE, Popen
+
+import psutil
 from loguru import logger
-
-from psmon.utils import graceful_kill
-
-
-class Reader(threading.Thread):
-    def __init__(self, fd, queue, text=False):
-        super().__init__()
-        self._fd = fd
-        self._queue = queue
-        self._text = text
-
-    def run(self):
-        for line in iter(self._fd.readline, b""):
-            if self._text:
-                line = line.decode().strip()
-            self._queue.put(line)
+from psmon.utils import FileReader, graceful_kill, first_true, extract_queue
 
 
 class ProcessMonitor:
@@ -90,7 +75,10 @@ class ProcessMonitor:
 
     def try_get_process_info(self, process):
         try:
-            return process.as_dict(list(self.watched_attrs.keys()))
+            stats = process.as_dict(list(self.watched_attrs.keys()))
+            if any(map(lambda x: x is None, stats.values())):
+                return None
+            return stats
         except psutil.NoSuchProcess:
             return None
 
@@ -120,8 +108,8 @@ class ProcessMonitor:
 
         with Popen(*self.popenargs, preexec_fn=os.setpgrp, **self.kwargs) as process:
             if self.capture_output:
-                stdout_reader = Reader(process.stdout, self.stdout_queue, self.text)
-                stderr_reader = Reader(process.stderr, self.stderr_queue, self.text)
+                stdout_reader = FileReader(process.stdout, self.stdout_queue, self.text)
+                stderr_reader = FileReader(process.stderr, self.stderr_queue, self.text)
                 stdout_reader.start()
                 stderr_reader.start()
             if self.input:
@@ -131,10 +119,13 @@ class ProcessMonitor:
             error_str = None
             is_premature_stop = False
             root_pid = process.pid
+
             for watcher in self.watchers.values():
                 watcher.register_root(root_pid)
+
             self.root_process = psutil.Process(root_pid)
             self.processes.add(self.root_process)
+
             processes_info = self.get_processes_info()
             if len(processes_info) == 0:
                 is_premature_stop = True
@@ -150,11 +141,15 @@ class ProcessMonitor:
 
                 self.send_processes_stats(self.get_processes_info())
 
-                for watcher in self.watchers.values():
-                    if watcher.should_terminate(root_pid):
-                        error, error_str = watcher.get_error(root_pid)
-                        should_terminate = True
-                        break
+                terminating_watcher = first_true(
+                    lambda watcher: watcher.should_terminate(root_pid),
+                    self.watchers.values(),
+                )
+
+                if terminating_watcher is not None:
+                    error, error_str = terminating_watcher.get_error(root_pid)
+                    should_terminate = True
+                    break
 
                 time.sleep(1.0 / self.freq)
 
@@ -180,14 +175,8 @@ class ProcessMonitor:
         if self.capture_output:
             stdout_reader.join()
             stderr_reader.join()
-            stdout = []
-            while not self.stdout_queue.empty():
-                stdout.append(self.stdout_queue.get())
-            stderr = []
-            while not self.stderr_queue.empty():
-                stderr.append(self.stderr_queue.get())
-            stats["stdout"] = stdout
-            stats["stderr"] = stderr
+            stats["stdout"] = extract_queue(self.stdout_queue)
+            stats["stderr"] = extract_queue(self.stderr_queue)
 
         if stats["error"]:
             logger.warning(stats["error_str"])
@@ -195,6 +184,6 @@ class ProcessMonitor:
         atexit.unregister(self.stop)
         res = resource.getrusage(resource.RUSAGE_SELF)
         own_cpu_time = res.ru_utime + res.ru_stime
-        logger.debug(f"Used approximately {own_cpu_time: .2f}s cpu time for monitoring")
+        stats["psmon_cpu_time"] = own_cpu_time
         logger.info(stats)
         return stats
