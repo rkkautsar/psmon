@@ -7,7 +7,7 @@ from subprocess import PIPE, Popen
 
 import psutil
 from loguru import logger
-from psmon.utils import FileReader, graceful_kill, first_true, extract_queue
+from psmon.utils import FileReader, graceful_kill, first_true, extract_file_queue
 
 
 class ProcessMonitor:
@@ -17,7 +17,6 @@ class ProcessMonitor:
         input=None,
         capture_output=False,
         freq=10,
-        text=False,
         **kwargs,
     ):
         if input is not None:
@@ -39,7 +38,6 @@ class ProcessMonitor:
         self.popenargs = popenargs
         self.input = input
         self.capture_output = capture_output
-        self.text = text
         self.freq = freq
         self.kwargs = kwargs
         self.watchers = {}
@@ -108,12 +106,13 @@ class ProcessMonitor:
 
         with Popen(*self.popenargs, preexec_fn=os.setpgrp, **self.kwargs) as process:
             if self.capture_output:
-                stdout_reader = FileReader(process.stdout, self.stdout_queue, self.text)
-                stderr_reader = FileReader(process.stderr, self.stderr_queue, self.text)
+                stdout_reader = FileReader(process.stdout, self.stdout_queue)
+                stderr_reader = FileReader(process.stderr, self.stderr_queue)
                 stdout_reader.start()
                 stderr_reader.start()
             if self.input:
                 process.stdin.write(self.input)
+                process.stdin.close()
 
             error = None
             error_str = None
@@ -175,8 +174,8 @@ class ProcessMonitor:
         if self.capture_output:
             stdout_reader.join()
             stderr_reader.join()
-            stats["stdout"] = extract_queue(self.stdout_queue)
-            stats["stderr"] = extract_queue(self.stderr_queue)
+            stats["stdout"] = extract_file_queue(self.stdout_queue)
+            stats["stderr"] = extract_file_queue(self.stderr_queue)
 
         if stats["error"]:
             logger.warning(stats["error_str"])

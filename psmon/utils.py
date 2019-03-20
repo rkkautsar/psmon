@@ -5,23 +5,20 @@ import psutil
 
 
 class FileReader(threading.Thread):
-    def __init__(self, fd, queue, text=False):
+    def __init__(self, fd, queue):
         super().__init__()
         self._fd = fd
         self._queue = queue
-        self._text = text
 
     def run(self):
         for line in iter(self._fd.readline, b""):
-            if self._text:
-                line = line.decode("utf-8").strip()
             self._queue.put(line)
 
 
-def extract_queue(queue):
-    result = []
+def extract_file_queue(queue):
+    result = b""
     while not queue.empty():
-        result.append(queue.get())
+        result += queue.get()
     return result
 
 
