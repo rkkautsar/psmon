@@ -16,5 +16,6 @@ class Watcher(object):
     def should_terminate(self, pid):
         return False
 
+    @classmethod
     def get_error(self, pid):
-        return None, None
+        raise NotImplementedError()

@@ -23,5 +23,6 @@ class WallTimeLimiter(Watcher):
     def should_terminate(self, pid):
         return time.perf_counter() - self._start_time > self._limit
 
-    def get_error(self, pid):
+    @classmethod
+    def get_error(cls, pid):
         return TimeoutError, "Wall time limit exceeded!"

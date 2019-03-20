@@ -57,7 +57,6 @@ def graceful_kill(processes, timeout=3):
         for proc in alive:
             proc.kill()
         gone, alive = psutil.wait_procs(processes, timeout=timeout)
-        assert len(alive) > 0
         stopped += gone
 
     returncodes = {proc.pid: proc.returncode for proc in stopped}

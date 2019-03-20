@@ -147,7 +147,6 @@ class ProcessMonitor:
 
             if is_premature_stop:
                 pid, ret, res = os.wait4(root_pid, os.WNOHANG | os.WUNTRACED)
-                assert pid == root_pid
                 stats = {
                     watcher_id: watcher.fallback(res)
                     for watcher_id, watcher in self.watchers.items()
