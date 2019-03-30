@@ -37,6 +37,9 @@ class ProcessMonitor:
         self.watched_attrs = dict(pid=1, ppid=1, status=1)
         self.root_process = None
         self.processes = set()
+        self.error = None
+        self.error_str = None
+
 
     def subscribe(self, watcher_id, watcher):
         self.watchers[watcher_id] = watcher
@@ -90,6 +93,28 @@ class ProcessMonitor:
 
     def stop(self):
         return graceful_kill(self.processes)
+    
+    def loop(self):
+        should_terminate = False
+        while self.is_root_process_running() and not should_terminate:
+            try:
+                self.update_tree()
+            except psutil.NoSuchProcess:
+                break
+
+            self.send_processes_stats(self.get_processes_info())
+
+            terminating_watcher = first_true(
+                lambda watcher: watcher.should_terminate(self.root_pid),
+                self.watchers.values(),
+            )
+
+            if terminating_watcher is not None:
+                self.error, self.error_str = terminating_watcher.get_error(self.root_pid)
+                should_terminate = True
+                break
+
+            time.sleep(1.0 / self.freq)
 
     def run(self):
         atexit.register(self.stop)
@@ -98,15 +123,13 @@ class ProcessMonitor:
         stderr_reader = None
 
         with Popen(*self.popenargs, preexec_fn=os.setpgrp, **self.kwargs) as process:
-            error = None
-            error_str = None
             is_premature_stop = False
-            root_pid = process.pid
+            self.root_pid = process.pid
 
             for watcher in self.watchers.values():
-                watcher.register_root(root_pid)
+                watcher.register_root(self.root_pid)
 
-            self.root_process = psutil.Process(root_pid)
+            self.root_process = psutil.Process(self.root_pid)
             self.processes.add(self.root_process)
 
             processes_info = self.get_processes_info()
@@ -124,29 +147,10 @@ class ProcessMonitor:
                 process.stdin.write(self.input)
                 process.stdin.close()
 
-            should_terminate = False
-            while self.is_root_process_running() and not should_terminate:
-                try:
-                    self.update_tree()
-                except psutil.NoSuchProcess:
-                    break
-
-                self.send_processes_stats(self.get_processes_info())
-
-                terminating_watcher = first_true(
-                    lambda watcher: watcher.should_terminate(root_pid),
-                    self.watchers.values(),
-                )
-
-                if terminating_watcher is not None:
-                    error, error_str = terminating_watcher.get_error(root_pid)
-                    should_terminate = True
-                    break
-
-                time.sleep(1.0 / self.freq)
+            self.loop()
 
             if is_premature_stop:
-                pid, ret, res = os.wait4(root_pid, os.WNOHANG | os.WUNTRACED)
+                pid, ret, res = os.wait4(self.root_pid, os.WNOHANG | os.WUNTRACED)
                 stats = {
                     watcher_id: watcher.fallback(res)
                     for watcher_id, watcher in self.watchers.items()
@@ -154,14 +158,14 @@ class ProcessMonitor:
                 stats["return_code"] = ret
             else:
                 stats = {
-                    watcher_id: watcher.get_stats(root_pid)
+                    watcher_id: watcher.get_stats(self.root_pid)
                     for watcher_id, watcher in self.watchers.items()
                 }
                 return_codes = self.stop()
-                stats["return_code"] = return_codes[root_pid]
+                stats["return_code"] = return_codes[self.root_pid]
 
-            stats["error"] = error
-            stats["error_str"] = error_str
+            stats["error"] = self.error
+            stats["error_str"] = self.error_str
 
         if self.capture_output:
             stdout_reader.join()
