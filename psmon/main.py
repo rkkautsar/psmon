@@ -40,7 +40,6 @@ class ProcessMonitor:
         self.error = None
         self.error_str = None
 
-
     def subscribe(self, watcher_id, watcher):
         self.watchers[watcher_id] = watcher
         for attr in watcher.watched_attrs:
@@ -93,7 +92,7 @@ class ProcessMonitor:
 
     def stop(self):
         return graceful_kill(self.processes)
-    
+
     def loop(self):
         should_terminate = False
         while self.is_root_process_running() and not should_terminate:
@@ -110,7 +109,9 @@ class ProcessMonitor:
             )
 
             if terminating_watcher is not None:
-                self.error, self.error_str = terminating_watcher.get_error(self.root_pid)
+                self.error, self.error_str = terminating_watcher.get_error(
+                    self.root_pid
+                )
                 should_terminate = True
                 break
 
@@ -150,7 +151,7 @@ class ProcessMonitor:
             self.loop()
 
             if is_premature_stop:
-                pid, ret, res = os.wait4(self.root_pid, os.WNOHANG | os.WUNTRACED)
+                _, ret, res = os.wait4(self.root_pid, os.WNOHANG | os.WUNTRACED)
                 stats = {
                     watcher_id: watcher.fallback(res)
                     for watcher_id, watcher in self.watchers.items()
