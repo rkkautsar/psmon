@@ -91,6 +91,7 @@ class ProcessMonitor:
         )
 
     def stop(self):
+        self.update_tree()
         return graceful_kill(self.processes)
 
     def loop(self):
