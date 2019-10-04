@@ -11,7 +11,7 @@ homepage = "https://github.com/rkkautsar/psmon"
 [tool.poetry.dependencies]
 python = ">=3.6"
 psutil = "^5.5"
-loguru = "^0.2.5"
+loguru = ">=0.2.5,<0.4.0"
 
 [tool.poetry.dev-dependencies]
 pylint = "^2.4"
