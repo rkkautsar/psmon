@@ -17,7 +17,7 @@ loguru = "^0.2.5"
 pylint = "^2.4"
 black = "=19.3b0"
 pytest = "^4.6"
-pytest-parallel = "^0.0.9"
+pytest-parallel = "^0.0.10"
 pytest-cov = "^2.8"
 
 [build-system]
